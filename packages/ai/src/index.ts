@@ -1,3 +1,10 @@
 export type { AIProvider, SynthesisInput, SynthesisOutput, RestaurantCandidate, ProposalOutput } from './interface';
 export { ClaudeAIProvider } from './adapters/claude';
 export { buildSynthesisPrompt } from './prompts/restaurant-synthesis';
+export { runPipeline } from './pipeline/orchestrator';
+export type { PipelineResult, PipelineStage, ImplicitContext, StructuredConstraint, RestaurantScore, EnvyScore, ProposalWithNarrative } from './pipeline/types';
+export { PipelineError } from './pipeline/types';
+export { logStage, safeLogStage } from './utils/logger';
+export { computeCostMicros } from './utils/cost-tracker';
+export { getCachedRestaurant, setCachedRestaurant } from './utils/cache';
+export type { RestaurantCacheRow } from './utils/cache';

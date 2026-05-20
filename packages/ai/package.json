@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.24.0",
+    "@supabase/supabase-js": "^2.0.0",
     "@groupplan/types": "workspace:*"
   },
   "devDependencies": {
