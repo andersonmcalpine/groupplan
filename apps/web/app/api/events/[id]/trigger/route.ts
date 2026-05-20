@@ -7,6 +7,7 @@ import { GooglePlacesVenueProvider, YelpVenueProvider } from '@groupplan/venues'
 import type { RestaurantCandidate } from '@groupplan/ai';
 import { ensureEnvLoaded } from '@/lib/env';
 import { getNotificationService, sendBatch, appUrl } from '@/lib/notifications';
+import { rateLimit } from '@/lib/rate-limit';
 
 ensureEnvLoaded();
 
@@ -20,10 +21,23 @@ export async function POST(request: Request, { params }: Context) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
+  // Per-user rate limit: 10 triggers per hour
+  const userRl = rateLimit(`trigger:user:${user.id}`, 10, 3600000);
+  if (!userRl.ok) {
+    return NextResponse.json({ error: 'Rate limit exceeded', retryAfterSec: userRl.retryAfterSec }, { status: 429 });
+  }
+
   const { data: event } = await getEventById(supabase, id);
   if (!event || event.host_id !== user.id) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
+
+  // Per-event rate limit: 1 trigger per 5 minutes
+  const eventRl = rateLimit(`trigger:event:${id}`, 1, 300000);
+  if (!eventRl.ok) {
+    return NextResponse.json({ error: 'Rate limit exceeded', retryAfterSec: eventRl.retryAfterSec }, { status: 429 });
+  }
+
   if (event.status !== 'collecting' && event.status !== 'deciding') {
     return NextResponse.json(
       { error: 'AI synthesis can only run while status is collecting or deciding' },
