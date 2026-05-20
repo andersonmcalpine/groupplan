@@ -12,6 +12,7 @@ import { criticVerifier } from '../stages/critic-verifier';
 import { narrativeGenerator } from '../stages/narrative-generator';
 import { runParallel } from './parallel-runner';
 import { PipelineResult, PipelineError } from './types';
+import type { ImplicitInferenceResult } from './types';
 
 void dealbreakerDetector;
 void implicitInference;
@@ -26,6 +27,7 @@ void criticVerifier;
 void narrativeGenerator;
 void runParallel;
 
+// implicit is ImplicitInferenceResult — carries both ImplicitContext and inferred ConstraintItem[]
 export async function runPipeline(eventId: string): Promise<PipelineResult> {
   void eventId;
   throw new PipelineError('load-event-data', new Error('not implemented'));

@@ -605,12 +605,13 @@ full rollback. New DB tables and columns are additive — legacy adapter ignores
 Update the line below at the end of each session.
 
 ```
-Current session: Session 2 — Track B stages (dealbreaker-detector, implicit-inference, constraint-extractor)
+Current session: Session 3 — Track A stages (Gemini Maps grounding, Menu Phantom, cache)
 ```
 
 ### Session log
 
 - [x] Session 1: Skeleton + DB migration (2026-05-20) — 33 new files, migration 009
+- [x] Session 2: Track B — dealbreaker-detector, implicit-inference, constraint-extractor (2026-05-20) — 30 new tests, 127/127 pass
 - [ ] Session 2: Track B — dealbreaker, implicit inference, constraint extractor
 - [ ] Session 3: Track A — Gemini Maps grounding, Menu Phantom, cache
 - [ ] Session 4: Scoring stack — deterministic scorer, vibe embedder, reranker, fairness checker
@@ -625,5 +626,11 @@ Record decisions made during sessions that aren't visible in code:
 
 **Session 1:**
 - `menu-phantom.ts` exports `menuPhantom` (not `enrich()`), `deterministic-scorer.ts` exports `deterministicScorer` (not `score()`) — orchestrator import names take precedence over spec aliases.
-- `logStage()` throws on DB failure (not swallowed). Callers that want non-fatal logging should wrap in `.catch(() => {})` — mirror the pattern in the legacy `logUsage` call in `trigger/route.ts`.
-- Migration number is `009_ai_pipeline.sql` (not `003` as written in spec — migrations 001–008 pre-existed).
+- `logStage()` throws on DB failure. Use `safeLogStage()` (fire-and-forget) for all stage observability calls — only use `logStage()` when DB failure should propagate.
+- Migration number is `009_ai_pipeline.sql` (not `003` as written in spec — migrations 001–008 pre-existed)
+
+**Session 2:**
+- Added `ConstraintItem` (per-constraint atom), `ConstraintStrength`, `ImplicitInferenceResult` to `pipeline/types.ts`. `StructuredConstraint` is the DB-mapped per-guest aggregate; `ConstraintItem[]` is the Track B intermediate representation.
+- `implicit-inference` is synchronous — no API call. Returns `ImplicitInferenceResult` (context + inferred ConstraintItem[]).
+- `constraint-extractor` DB write is fatal (throws PipelineError on Supabase error) — constraints are required pipeline state.
+- `structured_constraints.invitation_id` has `UNIQUE` constraint added to migration 009 (required for `upsert onConflict`). If 009 is already applied to any environment, create a `010_unique_invitation_id.sql` instead..

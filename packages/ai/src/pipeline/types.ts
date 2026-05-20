@@ -30,9 +30,10 @@ export interface StructuredConstraint {
   budget_max: number;
   vibe_tags: string[];
   dealbreaker_flags: string[];
-  intensity_tier: 'hard' | 'strong' | 'soft';
+  intensity_tier: 'hard' | 'strong' | 'soft' | 'inferred';
   weight_multiplier: number;
   raw_text: string;
+  items?: ConstraintItem[];
 }
 
 export interface RestaurantScore {
@@ -79,4 +80,31 @@ export class PipelineError extends Error {
   ) {
     super(`Pipeline failed at stage: ${stage}`);
   }
+}
+
+export type ConstraintStrength = 'hard' | 'soft' | 'inferred' | 'unknown';
+
+export interface ConstraintItem {
+  id: string;
+  category:
+    | 'dietary'
+    | 'allergy'
+    | 'budget'
+    | 'location'
+    | 'time'
+    | 'cuisine'
+    | 'accessibility'
+    | 'ambiance'
+    | 'service_speed'
+    | 'other';
+  strength: ConstraintStrength;
+  value: string;
+  sourceText?: string;
+  confidence: number;
+  reason?: string;
+}
+
+export interface ImplicitInferenceResult {
+  context: ImplicitContext;
+  inferred: ConstraintItem[];
 }

@@ -22,7 +22,7 @@ CREATE INDEX idx_ai_logs_stage ON ai_logs(stage);
 
 CREATE TABLE structured_constraints (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  invitation_id   UUID NOT NULL REFERENCES invitations(id) ON DELETE CASCADE,
+  invitation_id   UUID NOT NULL UNIQUE REFERENCES invitations(id) ON DELETE CASCADE,
   event_id        UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
   dietary_hard    TEXT[] DEFAULT '{}',
   dietary_soft    TEXT[] DEFAULT '{}',

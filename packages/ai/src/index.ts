@@ -8,3 +8,4 @@ export { logStage, safeLogStage } from './utils/logger';
 export { computeCostMicros } from './utils/cost-tracker';
 export { getCachedRestaurant, setCachedRestaurant } from './utils/cache';
 export type { RestaurantCacheRow } from './utils/cache';
+export type { ConstraintStrength, ConstraintItem, ImplicitInferenceResult } from './pipeline/types';
