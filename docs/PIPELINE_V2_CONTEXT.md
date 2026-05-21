@@ -15,13 +15,13 @@ Repo: github.com/andersonmcalpine/groupplan
 
 ---
 
-## Current Codebase State (before pipeline v2)
+## Current Codebase State (as of Session 6)
 
 ### Packages
 
 ```
 packages/
-├── ai/          @groupplan/ai    — single Claude Haiku adapter (being replaced)
+├── ai/          @groupplan/ai    — Pipeline v2 implementation (active)
 ├── venues/      @groupplan/venues — Google Places + Yelp fetching
 ├── notifications/ @groupplan/notifications
 ├── calendar/    @groupplan/calendar
@@ -31,77 +31,80 @@ packages/
 ### App routes (apps/web)
 
 ```
-app/api/events/[id]/trigger/route.ts   ← main pipeline entry point (being updated)
-app/api/events/[id]/context/route.ts   ← new in session 7
+app/api/events/[id]/trigger/route.ts   ← pipeline entry point; PIPELINE_V2 flag added
 app/api/events/
 app/events/
 app/invite/
 ```
 
-### Supabase tables (current)
+### Supabase tables (original + v2 additions)
 
 ```
-events          — event metadata, host, location_hint, event_date
+events          — event metadata, host, location_hint, proposed_date
 invitations     — guest RSVPs linked to events
-preferences     — raw free-text preference input per guest
-restaurants     — cached Places/Yelp results
-proposals       — AI-generated ranked proposals (being extended)
+guest_preferences — structured preference input per guest (dietary[], cuisine_prefs[], notes, etc.)
+restaurants     — cached Places/Yelp results (legacy)
+proposals       — AI-generated ranked proposals (extended with v2 columns via migration 009)
 votes           — guest votes on proposals
 users           — auth table
+ai_logs         — pipeline stage observability (added migration 009)
+structured_constraints — per-guest structured output from constraint-extractor (added 009 + 010)
+restaurant_cache — vibe embeddings + dietary analysis cache (added migration 009)
 ```
 
-### Current AI adapter (packages/ai/src/adapters/claude.ts)
+### Legacy AI adapter (packages/ai/src/adapters/claude.ts)
 
 Single-shot pattern — takes raw preferences + restaurant list, returns 3
-ranked proposals via assistant prefill JSON hack. This is what we are
-replacing. Do not delete it — it stays behind the PIPELINE_V2 feature flag.
+ranked proposals via assistant prefill JSON hack. **Do not delete** — stays
+behind `PIPELINE_V2=false`. All v2 stages use `tool_use` only.
 
 ---
 
-## Target: packages/ai directory layout after restructure
+## Actual packages/ai directory layout (Sessions 1–6 complete)
 
 ```
 packages/ai/
 ├── src/
 │   ├── pipeline/
-│   │   ├── orchestrator.ts        — main entry point, runPipeline()
-│   │   ├── parallel-runner.ts     — Promise.all wrapper for Track A + B
-│   │   └── types.ts               — all shared interfaces
+│   │   ├── orchestrator.ts        — runPipeline(), injectable loader, IMPLEMENTED
+│   │   ├── parallel-runner.ts     — Promise.all wrapper
+│   │   └── types.ts               — all shared interfaces (see section below)
 │   ├── stages/
-│   │   ├── dealbreaker-detector.ts
-│   │   ├── implicit-inference.ts
-│   │   ├── constraint-extractor.ts
-│   │   ├── deterministic-scorer.ts
-│   │   ├── vibe-embedder.ts
-│   │   ├── reranker.ts
-│   │   ├── fairness-checker.ts
-│   │   ├── reasoning-engine.ts
-│   │   ├── critic-verifier.ts
-│   │   └── narrative-generator.ts
+│   │   ├── dealbreaker-detector.ts    — IMPLEMENTED (tool_use, Haiku)
+│   │   ├── implicit-inference.ts      — IMPLEMENTED (pure TS, synchronous)
+│   │   ├── constraint-extractor.ts    — IMPLEMENTED (tool_use, Haiku, DB write)
+│   │   ├── deterministic-scorer.ts    — IMPLEMENTED (pure TS, synchronous)
+│   │   ├── vibe-embedder.ts           — IMPLEMENTED (Voyage AI REST, cosine sim)
+│   │   ├── reranker.ts                — IMPLEMENTED (deterministic; Cohere deferred)
+│   │   ├── fairness-checker.ts        — IMPLEMENTED (pure TS, synchronous)
+│   │   ├── reasoning-engine.ts        — IMPLEMENTED (Sonnet + extended thinking)
+│   │   ├── critic-verifier.ts         — IMPLEMENTED (Haiku, simplified — no swap/rerun yet)
+│   │   └── narrative-generator.ts     — IMPLEMENTED (Haiku, privacy rule enforced)
 │   ├── adapters/
-│   │   ├── anthropic.ts
-│   │   ├── gemini.ts
-│   │   ├── cohere.ts
-│   │   ├── voyage.ts
-│   │   └── yelp-ai.ts
+│   │   ├── anthropic.ts           — stub (unused in v2 path)
+│   │   ├── gemini.ts              — IMPLEMENTED (function calling; NOT google_maps grounding)
+│   │   ├── cohere.ts              — stub (Cohere reranker deferred to Session 7)
+│   │   ├── voyage.ts              — stub (direct REST used instead in vibe-embedder)
+│   │   └── yelp-ai.ts             — stub
 │   ├── prompts/
-│   │   ├── dealbreaker.ts
-│   │   ├── constraint-extraction.ts
-│   │   ├── reasoning-system.ts
-│   │   ├── critic-system.ts
-│   │   └── narrative-system.ts
+│   │   ├── dealbreaker.ts         — stub (prompt is inlined in stage)
+│   │   ├── constraint-extraction.ts — stub (prompt is inlined in stage)
+│   │   ├── reasoning-system.ts    — IMPLEMENTED
+│   │   ├── critic-system.ts       — IMPLEMENTED
+│   │   └── narrative-system.ts    — IMPLEMENTED
 │   ├── utils/
-│   │   ├── logger.ts
-│   │   ├── cost-tracker.ts
-│   │   └── cache.ts
-│   └── interface.ts
+│   │   ├── logger.ts              — IMPLEMENTED (safeLogStage + logStage)
+│   │   ├── cost-tracker.ts        — IMPLEMENTED
+│   │   ├── cache.ts               — IMPLEMENTED (getCachedRestaurant/setCachedRestaurant)
+│   │   └── retry.ts               — IMPLEMENTED (shared withRetry utility)
+│   └── interface.ts               — legacy AIProvider interface (kept for claude.ts)
 ├── package.json
 └── tsconfig.json
 ```
 
 ---
 
-## TypeScript Interfaces (pipeline/types.ts)
+## TypeScript Interfaces (actual state of pipeline/types.ts after Session 6)
 
 ```typescript
 export interface PipelineResult {
@@ -111,6 +114,18 @@ export interface PipelineResult {
   conflictsResolved: string[];
   totalLatencyMs: number;
   totalCostMicros: number;
+  candidateDetails: Record<string, CandidateDetail>; // place_id → restaurant info
+}
+
+export interface CandidateDetail {
+  name: string;
+  address: string;
+  cuisine_types: string[];
+  price_range: string;
+  rating: number;
+  review_summary: string;
+  image_url?: string;
+  maps_url?: string;
 }
 
 export interface PipelineStage<TInput, TOutput> {
@@ -124,6 +139,11 @@ export interface ImplicitContext {
   group_size_class: 'intimate' | 'small' | 'medium' | 'large';
 }
 
+export interface ImplicitInferenceResult {
+  context: ImplicitContext;
+  inferred: ConstraintItem[];   // keyword-derived inferred constraints
+}
+
 export interface StructuredConstraint {
   guest_id: string;
   invitation_id: string;
@@ -132,35 +152,84 @@ export interface StructuredConstraint {
   dietary_soft: string[];
   cuisine_likes: Record<string, number>;  // { "italian": 0.9 }
   cuisine_avoids: string[];
-  budget_min: number;            // cents
-  budget_max: number;            // cents
+  budget_min: number;           // cents
+  budget_max: number;           // cents (999999 = unconstrained)
   vibe_tags: string[];
   dealbreaker_flags: string[];
-  intensity_tier: 'hard' | 'strong' | 'soft';
-  weight_multiplier: number;     // default 1.0
+  intensity_tier: 'hard' | 'strong' | 'soft' | 'inferred';  // 4 values — inferred added in S2
+  weight_multiplier: number;    // default 1.0
   raw_text: string;
+  items?: ConstraintItem[];     // intermediate Track B representation
+}
+
+export type ConstraintStrength = 'hard' | 'soft' | 'inferred' | 'unknown';
+
+export interface ConstraintItem {
+  id: string;
+  category: 'dietary' | 'allergy' | 'budget' | 'location' | 'time' | 'cuisine'
+          | 'accessibility' | 'ambiance' | 'service_speed' | 'other';
+  strength: ConstraintStrength;
+  value: string;
+  sourceText?: string;
+  confidence: number;
+  reason?: string;
+}
+
+// Data provenance for menu/dietary signals
+export type DataSource = 'grounded' | 'inferred' | 'unknown';
+
+export interface DietarySignal {
+  source: DataSource;
+  confidence: number;   // 0.0–1.0
+  evidence?: string;    // short explanation, if known
+}
+
+// Keys: dietary categories ('vegetarian', 'vegan', 'gluten_free', etc.)
+export type DietaryAnalysis = Record<string, DietarySignal>;
+
+// Output of Gemini grounding + Menu Phantom enrichment
+export interface EnrichedCandidate {
+  place_id: string;        // WARNING: model-generated slug, NOT a canonical Google Maps ID
+  name: string;
+  address: string;
+  cuisine_types: string[];
+  price_range: string;     // '$' | '$$' | '$$$' | '$$$$'
+  rating: number;          // 0–5
+  review_count: number;
+  review_summary: string;
+  dietary_analysis: DietaryAnalysis;
+  enrichment_tier: 1 | 2 | 3;  // Menu Phantom tier used (only 1 is operational)
+  image_url?: string;
+  maps_url?: string;
 }
 
 export interface RestaurantScore {
   place_id: string;
   name: string;
+  review_summary: string;
   dietary_score: number;
   budget_score: number;
   cuisine_score: number;
-  location_score: number;
+  location_score: number;        // 0.5 placeholder — real scoring deferred
   review_score: number;
   composite: number;
-  vibeMatchScore: number;
+  vibeMatchScore: number;        // 0.0 placeholder until vibe-embedder runs; 0.3 if no review text
   disqualified: boolean;
   disqualify_reason?: string;
-  enrichedDescription: string;
-  dietaryAnalysis: Record<string, number>;
-  priceLevel: number;
+  enrichedDescription: string;   // populated by scorer for reranker use
+  dietaryAnalysis: Record<string, number>;  // category → numeric score (not DietarySignal)
+  priceLevel: number;            // estimated cents; 0 = unknown price
+  confidence: number;            // 0.0–1.0
+  penalties: string[];           // explanation fragments
+  bonuses: string[];             // explanation fragments
+  constraintMatchSummary: string;
+  envy_scores?: Record<string, number>;    // guest_id → 0.0–1.0, set by fairness-checker
+  fairness_warnings?: string[];            // set by fairness-checker
 }
 
 export interface EnvyScore {
   restaurant_id: string;
-  envy_scores: Record<string, number>;  // { guest_uuid: 0.3 }
+  envy_scores: Record<string, number>;
   warnings: string[];
 }
 
@@ -173,8 +242,8 @@ export interface ProposalWithNarrative {
   fairness_note: string;
   envy_scores: Record<string, number>;
   constraint_coverage: Record<string, boolean>;
-  narrative_group: string;
-  narrative_personal: Record<string, string>;  // { guest_id: narrative }
+  narrative_group: string;              // populated by narrative-generator
+  narrative_personal: Record<string, string>;  // guest_id → personal narrative
   confidence_score: number;
 }
 
@@ -190,9 +259,13 @@ export class PipelineError extends Error {
 
 ---
 
-## Database Schema — New Tables (migration 003_ai_pipeline.sql)
+## Database Schema
+
+### Migration 009 — `supabase/migrations/009_ai_pipeline.sql`
 
 ```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+
 CREATE TABLE ai_logs (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   event_id      UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
@@ -214,7 +287,7 @@ CREATE INDEX idx_ai_logs_stage ON ai_logs(stage);
 
 CREATE TABLE structured_constraints (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  invitation_id   UUID NOT NULL REFERENCES invitations(id) ON DELETE CASCADE,
+  invitation_id   UUID NOT NULL UNIQUE REFERENCES invitations(id) ON DELETE CASCADE,
   event_id        UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
   dietary_hard    TEXT[] DEFAULT '{}',
   dietary_soft    TEXT[] DEFAULT '{}',
@@ -243,281 +316,379 @@ CREATE TABLE restaurant_cache (
 );
 CREATE INDEX idx_rcache_place ON restaurant_cache(place_id);
 
-ALTER TABLE proposals ADD COLUMN envy_scores JSONB;
-ALTER TABLE proposals ADD COLUMN constraint_coverage JSONB;
-ALTER TABLE proposals ADD COLUMN narrative_group TEXT;
-ALTER TABLE proposals ADD COLUMN narrative_personal JSONB;
-ALTER TABLE proposals ADD COLUMN confidence_score FLOAT;
+ALTER TABLE proposals ADD COLUMN IF NOT EXISTS envy_scores JSONB;
+ALTER TABLE proposals ADD COLUMN IF NOT EXISTS constraint_coverage JSONB;
+ALTER TABLE proposals ADD COLUMN IF NOT EXISTS narrative_group TEXT;
+ALTER TABLE proposals ADD COLUMN IF NOT EXISTS narrative_personal JSONB;
+ALTER TABLE proposals ADD COLUMN IF NOT EXISTS confidence_score FLOAT;
+
+ALTER TABLE ai_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE structured_constraints ENABLE ROW LEVEL SECURITY;
+ALTER TABLE restaurant_cache ENABLE ROW LEVEL SECURITY;
+-- NOTE: RLS policies not yet defined — deferred to Session 7
 ```
+
+### Migration 010 — `supabase/migrations/010_add_structured_constraint_columns.sql`
+
+Added in pre-Session-3 stabilization pass. Extends `structured_constraints`:
+
+```sql
+ALTER TABLE structured_constraints
+  ADD COLUMN IF NOT EXISTS guest_id UUID REFERENCES users(id) ON DELETE SET NULL;
+
+ALTER TABLE structured_constraints
+  ADD COLUMN IF NOT EXISTS weight_multiplier FLOAT DEFAULT 1.0;
+
+-- Idempotent UNIQUE guard (for environments that applied 009 before UNIQUE was added)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'structured_constraints_invitation_id_key'
+  ) THEN
+    ALTER TABLE structured_constraints
+      ADD CONSTRAINT structured_constraints_invitation_id_key UNIQUE (invitation_id);
+  END IF;
+END $$;
+```
+
+### database.types.ts
+
+**Not yet regenerated** — proposals table v2 columns (`envy_scores`, `narrative_group`, `narrative_personal`, `confidence_score`) exist in the DB but are not in the TypeScript types. Session 7 must regenerate types before writing those fields from the trigger route.
 
 ---
 
 ## Environment Variables
 
 ```bash
-# Existing
+# Existing (legacy path)
 ANTHROPIC_API_KEY=
 GOOGLE_PLACES_API_KEY=
 YELP_API_KEY=
 
-# New — all required before Session 4
+# Required for pipeline v2
 GEMINI_API_KEY=
-COHERE_API_KEY=
+GEMINI_MODEL=                    # e.g. gemini-2.0-flash-exp
+COHERE_API_KEY=                  # required when Cohere reranker is added (Session 7)
 VOYAGE_API_KEY=
+VOYAGE_MODEL=                    # e.g. voyage-3
 ANTHROPIC_MODEL_REASONING=claude-sonnet-4-6
 ANTHROPIC_MODEL_FAST=claude-haiku-4-5-20251001
-PIPELINE_PARALLELISM=true
-PIPELINE_LOG_LEVEL=info
-PIPELINE_V2=false
+PIPELINE_LOG_LEVEL=info          # set to 'debug' to log raw AI payloads (PII risk)
+PIPELINE_V2=false                # set to 'true' to enable v2 path
 ```
 
 ---
 
-## Stage Specifications
+## Stage Specifications (as implemented through Session 6)
 
-### Stage 1 — Dealbreaker Detector
+### Stage 1 — Dealbreaker Detector ✅
 
-File: `stages/dealbreaker-detector.ts`
-Model: `ANTHROPIC_MODEL_FAST` (Haiku)
-Method: `tool_use` — never prefill
-Input: `{ guest_id: string, raw_text: string }[]`
-Output: `{ guest_id: string, hard: string[], strong: string[], soft: string[] }[]`
+File: `stages/dealbreaker-detector.ts`  
+Export: `dealbreakerDetector = { run }`  
+Model: `ANTHROPIC_MODEL_FAST` (Haiku)  
+Method: `tool_use` with `classify_constraints` tool, `tool_choice: { type: 'tool' }`  
+Input: `{ guest_id: string, raw_text: string }[]`  
+Output: `{ guest_id: string, items: ConstraintItem[] }[]`
 
-Tool schema name: `classify_constraints`
-Classification rule: escalate on uncertainty (false positive better than missed blocker)
-- "I'm allergic" / "I can't eat" / medical context → hard
-- "I don't eat" / "NO [food]" / firm budget → strong
-- "I'd prefer" / "would be nice" / "I like" → soft
+Classification rules (escalate on uncertainty):
+- "I'm allergic" / medical context → `hard`, category `allergy`, confidence ≥ 0.9
+- "I don't eat" / firm budget → `hard`, category `dietary`, confidence ≥ 0.85
+- "I'd prefer" / "I like" → `soft`
+- Contextual signals → `inferred`
 
-Logging: stage='dealbreaker', provider='anthropic'
-Retry: 2 retries, 1s backoff, rate limit errors only
-
----
-
-### Stage 2 — Implicit Inference
-
-File: `stages/implicit-inference.ts`
-Method: Pure TypeScript, synchronous, zero API calls
-Input: event record (title, event_date, guest_count)
-Output: `ImplicitContext`
-
-Rules:
-- Title contains "birthday"/"bday" → celebration, formality_bias +0.3
-- Title contains "team"/"standup"/"offsite" → work, formality_bias +0.5
-- 10am–2pm → lunch (weekend = brunch)
-- 5pm–8pm → dinner
-- 8pm+ → late_night, formality_bias +0.2
-- Guest count: 2→intimate, 3–6→small, 7–12→medium, 13+→large
+Constraint IDs are prefixed with `guest_N_` (e.g., `guest_0_c1`) to enable
+per-guest filtering. Retry: 2 retries, 1s backoff, 429 only. Logging: `safeLogStage`.
 
 ---
 
-### Stage 3 — Constraint Extractor
+### Stage 2 — Implicit Inference ✅
 
-File: `stages/constraint-extractor.ts`
-Model: `ANTHROPIC_MODEL_FAST` (Haiku)
-Method: Think Tool first, then `tool_use` structured output
-Input: dealbreaker output + ImplicitContext + raw preferences
-Output: `StructuredConstraint[]` — writes to `structured_constraints` table
+File: `stages/implicit-inference.ts`  
+Export: `implicitInference = { run }`  
+Method: Pure TypeScript, **synchronous**, zero API calls  
+Input: `EventRecord { id, title, event_date, guest_count }`  
+Output: `ImplicitInferenceResult { context: ImplicitContext, inferred: ConstraintItem[] }`
 
-Cuisine preferences as weighted map `{ cuisine: 0.0–1.0 }`
-Budget in cents
-Apply `weight_multiplier` from invitations table row
-
----
-
-### Stage 4 — Gemini Maps Grounding
-
-File: `adapters/gemini.ts`
-Model: Gemini Flash with google_maps grounding
-Input: `StructuredConstraint[]`, locationHint string
-Output: enriched restaurant candidates (same shape as existing Places adapter)
-
-Endpoint: `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash:generateContent`
-Grounding: `tools: [{ google_maps: {} }]`
-Error: throw descriptive error if GEMINI_API_KEY missing
+Signal rules:
+- "birthday"/"bday" → celebration, formality_bias +0.3, ambiance=celebratory item
+- "team"/"standup"/"offsite" → work, formality_bias +0.5, ambiance=professional item
+- "date night" / "romantic" → date, formality_bias +0.2, ambiance=romantic item
+- 10:00–13:00 → lunch (Sat/Sun = brunch); 17:00–19:00 → dinner; 20:00+ → late_night
+- guest_count: 2→intimate, 3–6→small, 7–12→medium, 13+→large
+- All inferred items have `strength: 'inferred'` — never `'hard'`
 
 ---
 
-### Stage 5 — Menu Phantom
+### Stage 3 — Constraint Extractor ✅
 
-File: `stages/menu-phantom.ts`
-Input: restaurant candidates + `StructuredConstraint[]`
-Output: candidates with `dietary_analysis` populated
+File: `stages/constraint-extractor.ts`  
+Export: `constraintExtractor = { run }`  
+Model: `ANTHROPIC_MODEL_FAST` (Haiku)  
+Method: `tool_use` with `extract_constraints` tool  
+Input: `RawPreference[]`, `DealbreakerOutput[]`, `ImplicitInferenceResult`  
+Output: `StructuredConstraint[]` — also **writes to `structured_constraints` table (fatal on failure)**
 
-Tier 1: parse Google AI review summary for dietary keywords
-Tier 2: only if Tier 1 ambiguous AND hard blocker exists — fetch /menu page
-Tier 3: only if Tiers 1+2 fail AND hard blocker exists — Gemini Flash vision
-  on up to 3 menu photos, 1–10 rating per dietary category
-Always check `restaurant_cache` first (30-day TTL)
-Log which tier was used
+`RawPreference { guest_id, invitation_id, event_id, raw_text, weight_multiplier? }`
 
----
-
-### Stage 6 — Deterministic Scorer
-
-File: `stages/deterministic-scorer.ts`
-Method: Pure TypeScript, synchronous
-Input: enriched candidates + `StructuredConstraint[]`
-Output: `RestaurantScore[]`
-
-Weights: dietary 0.30, budget 0.25, cuisine 0.20, location 0.15, review 0.10
-Hard filter: disqualify if any hard-blocker guest has `dietary_score < 1.0`
-Set `disqualify_reason` string when disqualifying
+Budget output: always in cents. Guest refs in prompt: `guest_0`, `guest_1`, etc.
+DB upsert: `onConflict: 'invitation_id'`. Retry: 2 retries, 1s, 429 only.
 
 ---
 
-### Stage 7 — Vibe Embedder
+### Stage 4 — Gemini Restaurant Discovery ✅
 
-File: `stages/vibe-embedder.ts`
-SDK: `voyageai`, model `voyage-3`
-Input: non-disqualified `RestaurantScore[]` + `StructuredConstraint[]`
-Output: same list with `vibeMatchScore` added
+File: `adapters/gemini.ts`  
+Export: `geminiMapsGrounding` (bare function) + `geminiAdapter = { run: geminiMapsGrounding }`  
+Method: **Gemini function calling** via `fetch` to Gemini REST API — NOT `google_maps` grounding  
+Input: `locationHint: string`, `constraints: StructuredConstraint[]`  
+Output: `EnrichedCandidate[]` (with empty `dietary_analysis: {}`, `enrichment_tier: 1`)
 
-Embed restaurant review summaries + attributes as `inputType: "document"`
-Embed group vibe query string as `inputType: "query"`
-Cosine similarity for `vibeMatchScore`
-Upsert embeddings to `restaurant_cache.vibe_embedding`
+**Critical:** `place_id` values in output are **model-generated slugs, not canonical Google Maps
+Place IDs**. Treat as session-local opaque handles. Do not assume they are stable,
+verifiable, or merge-safe across runs.
 
----
-
-### Stage 8 — Cohere Reranker
-
-File: `stages/reranker.ts`
-SDK: `cohere-ai` v2, model `rerank-v3.5`
-Input: `RestaurantScore[]` (top ~15 by composite) + `StructuredConstraint[]`
-Output: top 5 `RestaurantScore[]` after rerank
-
-Build `enrichedDescription` per restaurant: name + cuisine + review summary + dietary scores + price tier
-Build reranker query from full constraint profile via `buildRerankerQuery()` helper
+Env: `GEMINI_API_KEY`, `GEMINI_MODEL`. Retry: 2 retries, 1s, 429. `safeLogStage`.
 
 ---
 
-### Stage 9 — Fairness Checker
+### Stage 5 — Menu Phantom ✅ (Tier 1 only)
 
-File: `stages/fairness-checker.ts`
-Method: Pure TypeScript, synchronous
-Input: top 5 `RestaurantScore[]` + `StructuredConstraint[]`
-Output: same list with `envy_scores` map and `warnings` annotated
+File: `stages/menu-phantom.ts`  
+Export: `menuPhantom` (bare function alias for `enrich`) + `enrich`  
+Input: `EnrichedCandidate[]`, `StructuredConstraint[]`  
+Output: same array with `dietary_analysis` populated
 
-Envy formula:
+**Tier 1 (implemented):** Keyword analysis of `candidate.review_summary`.
+- High-confidence phrases (e.g., "certified halal") → `{ source: 'inferred', confidence: 0.85 }`
+- Low-confidence keywords → `{ source: 'inferred', confidence: 0.6 }`
+- Not mentioned → `{ source: 'unknown', confidence: 0 }`
+- **`source: 'grounded'` is NEVER set by Tier 1** — reserved for verified external data
+- Only analyzes categories that match a guest's actual dietary constraints
+
+**Tier 2 / Tier 3:** Stubs that throw `PipelineError('menu-phantom-tierN', not implemented)`.
+
+Cache-first: checks `restaurant_cache` per candidate. Cache writes are non-fatal. `safeLogStage`.
+
+---
+
+### Stage 6 — Deterministic Scorer ✅
+
+File: `stages/deterministic-scorer.ts`  
+Export: `deterministicScorer = { score }` (object with score method)  
+Method: Pure TypeScript, **synchronous**  
+Input: `EnrichedCandidate[]`, `StructuredConstraint[]`  
+Output: `RestaurantScore[]` sorted by composite DESC, disqualified last
+
+**Scoring weights:**
+```
+dietary 0.30 | budget 0.25 | cuisine 0.20 | location 0.15 | review 0.10
+```
+
+**Disqualification conditions (intentionally conservative):**
+1. Guest has `intensity_tier: 'hard'` AND `cuisine_avoids` entry matches candidate `cuisine_types`
+2. Candidate estimated price exceeds ALL hard-budget guests' `budget_max` by >50%
+
+**Unknown dietary → confidence penalty only, never disqualification.**
+Dietary signal scoring: grounded ≥ 0.9 → 1.0 | inferred ≥ 0.75 → 0.7 | unknown → 0.3.
+
+`location_score = 0.5` placeholder. `vibeMatchScore = 0.0` placeholder. `safeLogStage`.
+
+---
+
+### Stage 7 — Vibe Embedder ✅
+
+File: `stages/vibe-embedder.ts`  
+Export: `vibeEmbedder = { run }`  
+Method: Voyage AI REST API via `fetch` (no `voyageai` SDK)  
+Input: `RestaurantScore[]` (non-disqualified), `StructuredConstraint[]`  
+Output: same array with `vibeMatchScore` populated (0.0–1.0)
+
+Cache-first: checks `restaurant_cache.vibe_embedding` per candidate. Cache writes non-fatal.
+Batch embeds documents (review summaries) in one API call, embeds vibe query separately.
+Candidates with empty `review_summary` → `vibeMatchScore: 0.3` (neutral-low, no API call).
+Cosine similarity, clamped to [0, 1]. `safeLogStage`. Env: `VOYAGE_API_KEY`, `VOYAGE_MODEL`.
+
+---
+
+### Stage 8 — Reranker ✅ (deterministic; Cohere deferred)
+
+File: `stages/reranker.ts`  
+Export: `reranker = { run }`  
+Method: **Deterministic sort** — Cohere API integration deferred to Session 7  
+Input: `RestaurantScore[]` (vibe-scored), `StructuredConstraint[]`  
+Output: top 5 `RestaurantScore[]` by rerank score
+
+Rerank score formula: `composite * 0.50 + confidence * 0.25 + vibeMatchScore * 0.25`
+
+**Authority order is absolute:** disqualified candidates are excluded from output
+(orchestrator already filters them before this stage). Remaining sorted by rerank score DESC,
+top 5 returned. `safeLogStage`.
+
+---
+
+### Stage 9 — Fairness Checker ✅
+
+File: `stages/fairness-checker.ts`  
+Export: `fairnessChecker = { run }`  
+Method: Pure TypeScript, **synchronous**  
+Input: top 5 `RestaurantScore[]`, `StructuredConstraint[]`  
+Output: same list with `envy_scores` and `fairness_warnings` populated on each candidate
+
+Envy formula (as implemented, with guards):
 ```typescript
-function computeEnvyScore(guest: StructuredConstraint, restaurant: RestaurantScore): number {
+function computeEnvyScore(guest, restaurant): number {
   let envy = 0;
   if (guest.intensity_tier === 'hard') {
     envy = restaurant.dietary_score < 1.0 ? 1.0 : 0;
   }
-  const budgetGap = Math.max(0, restaurant.priceLevel - guest.budget_max) / guest.budget_max;
-  envy += budgetGap * 0.5;
+  // Guard: priceLevel === 0 means unknown price, not "free" — skip budget envy
+  if (restaurant.priceLevel !== 0 && guest.budget_max > 0 && guest.budget_max < 999999) {
+    const budgetGap = Math.max(0, restaurant.priceLevel - guest.budget_max) / guest.budget_max;
+    envy += budgetGap * 0.5;
+  }
   envy += (1 - restaurant.vibeMatchScore) * 0.3;
   return Math.min(envy, 1.0);
 }
 ```
 
-Flag: envy > 0.7 → add to warnings array with reason string
-Annotate only — do not filter
+**Warning threshold:** envy > 0.7 → adds warning string (uses `guest_0`/`guest_1` — never real IDs).
+
+**Important:** With Tier 1 data, `dietary_score` rarely reaches 1.0 (inferred max ~0.7), so
+warnings will be frequent. This is **intentional** — warnings are uncertainty/context signals
+for the reasoning engine, not disqualification signals. `safeLogStage`.
 
 ---
 
-### Stage 10 — Reasoning Engine
+### Stage 10 — Reasoning Engine ✅
 
-File: `stages/reasoning-engine.ts`
-Model: `ANTHROPIC_MODEL_REASONING` (Sonnet) with extended thinking `budget_tokens: 5000`
-Method: `tool_use`
-Input: fairness-annotated top 5 + `StructuredConstraint[]` + `ImplicitContext`
-Output: 3 proposals (ProposalWithNarrative without narratives yet)
+File: `stages/reasoning-engine.ts`  
+Export: `reasoningEngine = { run }`  
+Model: `ANTHROPIC_MODEL_REASONING` (Sonnet) with extended thinking `budget_tokens: 5000`  
+Method: `tool_use` with `submit_proposals` tool  
+Input: fairness-annotated `RestaurantScore[]`, `StructuredConstraint[]`, `ImplicitInferenceResult`  
+Output: `ProposalWithNarrative[]` (3 proposals; `narrative_group` and `narrative_personal` empty — filled by narrative-generator)
 
-Tool name: `submit_proposals`
-Schema: proposals array maxItems 3, each with place_id, rank, reasoning,
-  constraints_met, constraints_gap, fairness_note; plus group_summary,
-  conflicts_resolved
-Guest IDs in prompt: use guest_0/guest_1/etc. — never real names
-Include fairness warnings in prompt for any envy > 0.7
-System prompt lives in `prompts/reasoning-system.ts`
+Beta: `betas: ['interleaved-thinking-2025-05-14']` — verify against Anthropic docs before production.  
+`max_tokens: 16000`. Retry: 2 retries. Guest IDs in prompt: `guest_0`/`guest_1`/etc.  
+Fairness warnings treated as data uncertainty context, not rejection signals. `safeLogStage`.
 
 ---
 
-### Stage 11 — Critic Verifier
+### Stage 11 — Critic Verifier ✅ (simplified)
 
-File: `stages/critic-verifier.ts`
-Model: `ANTHROPIC_MODEL_FAST` (Haiku)
-Method: `tool_use`
-Input: 3 proposals + original `StructuredConstraint[]` + full reranked top 5
-Output: verified 3 proposals (with swaps if needed)
+File: `stages/critic-verifier.ts`  
+Export: `criticVerifier = { run }`  
+Model: `ANTHROPIC_MODEL_FAST` (Haiku)  
+Method: `tool_use` with `verify_proposals` tool  
+Input: `ProposalWithNarrative[]`, `StructuredConstraint[]`, `RestaurantScore[]` (full top-N)  
+Output: verified `ProposalWithNarrative[]` (failing proposals removed)
 
-System prompt in `prompts/critic-system.ts`
-Check 4 things: hard dietary accommodation, price realism, factual claims, overlooked candidates
-On hard failure: swap in next candidate from reranked list, re-run reasoning for that slot only
-No hard failure: return proposals unchanged
+**Session 7 deferred:** Swap-and-rerun (replacing a failing proposal with the next candidate
+and re-running reasoning for that slot) is not yet implemented. Failing proposals are simply
+removed. Throws `PipelineError` if all proposals fail. `safeLogStage`.
 
 ---
 
-### Stage 12 — Narrative Generator
+### Stage 12 — Narrative Generator ✅
 
-File: `stages/narrative-generator.ts`
-Model: `ANTHROPIC_MODEL_FAST` (Haiku)
-Method: `tool_use`
-Input: verified proposals + `StructuredConstraint[]`
+File: `stages/narrative-generator.ts`  
+Export: `narrativeGenerator = { run }`  
+Model: `ANTHROPIC_MODEL_FAST` (Haiku)  
+Method: `tool_use` with `generate_narratives` tool  
+Input: verified `ProposalWithNarrative[]`, `StructuredConstraint[]`  
 Output: proposals with `narrative_group` and `narrative_personal` populated
 
-Tool output schema: `{ group: string, personal: { [guest_id]: string } }` per proposal
-Group: 2-3 sentences, positive, zero individual attribution
-Personal: references specific guest's constraints being met
-System prompt in `prompts/narrative-system.ts`
-Privacy rule (include verbatim in system prompt):
-  "NEVER reveal one guest's preferences to another. The group narrative must
-   not contain any information that would let Guest A infer Guest B's specific
-   dietary restriction or budget."
+Group narrative: 2–3 sentences, no individual attribution, uses "reviews suggest"/"appears to
+offer" language — never "definitely has" or "verified to offer".
+
+Personal narratives: `guest_0`/`guest_1` keys from the model are remapped to real `guest_id`
+values before return (using constraints array index).
+
+Privacy rule (verbatim in system prompt):  
+"NEVER reveal one guest's preferences to another. The group narrative must not contain
+any information that would let Guest A infer Guest B's specific dietary restriction or budget."
+
+`safeLogStage`.
 
 ---
 
-## Orchestrator (pipeline/orchestrator.ts)
+## Orchestrator (actual implementation)
 
 ```typescript
-export async function runPipeline(eventId: string): Promise<PipelineResult> {
-  const startTime = Date.now();
-  const { preferences, event } = await loadEventData(eventId);
+// Injectable loader for testability
+type EventDataLoader = (eventId: string) => Promise<LoadedEventData>;
 
-  // Track B: sequential preference processing
-  const dealbreakers = await dealbreakerDetector.run(preferences);
+export async function runPipeline(
+  eventId: string,
+  options?: { loader?: EventDataLoader; locationHint?: string },
+): Promise<PipelineResult> {
+  const startTime = Date.now();
+  const loader = options?.loader ?? defaultLoader;
+  const { event, preferences } = await loader(eventId);
+  const locationHint = options?.locationHint ?? event.location_hint;
+
+  // Track B — sequential preference processing
+  const dealbreakerInputs = preferences.map(p => ({ guest_id: p.guest_id, raw_text: p.raw_text }));
+  const dealbreakers = await dealbreakerDetector.run(dealbreakerInputs);
   const implicit = implicitInference.run(event);
   const constraints = await constraintExtractor.run(preferences, dealbreakers, implicit);
 
-  // Track A: parallel data enrichment (starts after constraints ready)
-  const [mapsCandidates, placesSummaries] = await Promise.all([
-    geminiMapsGrounding.run(constraints, event.location_hint),
-    fetchPlacesAISummaries(event.location_hint, constraints),
-  ]);
+  // Track A — Gemini candidate discovery (fetchPlacesAISummaries not yet implemented)
+  const mapsCandidates = await geminiMapsGrounding(locationHint, constraints);
 
-  const allCandidates = mergeCandidates(mapsCandidates, placesSummaries);
-  const enrichedCandidates = await menuPhantom.enrich(allCandidates, constraints);
+  // Build candidateDetails before reranking drops some
+  const candidateDetails: Record<string, CandidateDetail> = {};
+  for (const c of mapsCandidates) { candidateDetails[c.place_id] = { ...c }; }
+
+  const enrichedCandidates = await menuPhantom(mapsCandidates, constraints);
   const scored = deterministicScorer.score(enrichedCandidates, constraints);
   const qualified = scored.filter(s => !s.disqualified);
+  if (qualified.length === 0) {
+    throw new PipelineError('orchestrator', new Error('all candidates were disqualified'));
+  }
+
   const withVibes = await vibeEmbedder.run(qualified, constraints);
   const top5 = await reranker.run(withVibes, constraints);
   const fairnessAnnotated = fairnessChecker.run(top5, constraints);
   const proposals = await reasoningEngine.run(fairnessAnnotated, constraints, implicit);
-  const verified = await criticVerifier.run(proposals, constraints);
+  const verified = await criticVerifier.run(proposals, constraints, top5);
   const withNarratives = await narrativeGenerator.run(verified, constraints);
 
-  await aiLogger.logPipelineRun(eventId, withNarratives, Date.now() - startTime);
-  return withNarratives;
+  return {
+    eventId,
+    proposals: withNarratives,
+    groupSummary: withNarratives[0]?.narrative_group ?? '',
+    conflictsResolved: [],
+    totalLatencyMs: Date.now() - startTime,
+    totalCostMicros: 0,  // deferred to Session 7
+    candidateDetails,
+  };
 }
 ```
 
+`defaultLoader` queries Supabase directly (event + invitations + guest_preferences) and
+builds `RawPreference[]` by concatenating structured preference fields into `raw_text`.
+Uses `invitation.id` as `guest_id` since `user_id` is nullable on invitations.
+
 ---
 
-## Cost Tracker (utils/cost-tracker.ts)
+## Feature Flag + Rollback
+
+In `apps/web/app/api/events/[id]/trigger/route.ts` (as implemented):
 
 ```typescript
-// review quarterly — provider prices change
-const PRICING = {
-  'claude-haiku-4-5':    { input: 0.80,  output: 4.00  },  // per MTok
-  'claude-sonnet-4-6':   { input: 3.00,  output: 15.00 },
-  'gemini-3-flash':      { input: 0.075, output: 0.30  },
-  'voyage-3':            { input: 0.06,  output: 0     },
-  'cohere-rerank-v3.5':  { perRequest: 0.002            },  // $2/1000
-};
+if (process.env.PIPELINE_V2 === 'true') {
+  const pipelineResult = await runPipeline(id, { locationHint: location });
+  // maps pipelineResult.candidateDetails[place_id] → proposal DB rows
+  // ... persists proposals, sends notifications, returns { ok: true, pipeline: 'v2' }
+  return NextResponse.json({ ok: true, emails: emailSummary, pipeline: 'v2' });
+}
+// Legacy path continues below — unchanged
 ```
+
+`PIPELINE_V2=false` (default) preserves the legacy `ClaudeAIProvider` path exactly.
+V2 proposal rows do NOT yet write `envy_scores`/`narrative_personal`/`confidence_score`
+to the DB (deferred to Session 7 after `database.types.ts` regeneration).
 
 ---
 
@@ -525,112 +696,140 @@ const PRICING = {
 
 ```typescript
 interface LogStageParams {
-  eventId: string;
-  stage: string;
-  provider: string;
-  model: string;
-  inputTokens: number;
-  outputTokens: number;
-  latencyMs: number;
-  rawInput: unknown;
-  rawOutput: unknown;
-  error?: string;
+  eventId: string;  stage: string;  provider: string;  model: string;
+  inputTokens: number;  outputTokens: number;  latencyMs: number;
+  rawInput: unknown;  rawOutput: unknown;  error?: string;
 }
 
-// input_hash: SHA256 of JSON.stringify(rawInput)
-// cost_micros: computed from PRICING map * token counts
-async function logStage(params: LogStageParams): Promise<void>
+// Fire-and-forget — use this by default. Never fails the caller.
+export function safeLogStage(params: LogStageParams): void
+
+// Throws on DB failure — only use when logging failure should propagate.
+export async function logStage(params: LogStageParams): Promise<void>
 ```
+
+`raw_input`/`raw_output` only written to DB when `PIPELINE_LOG_LEVEL=debug` (PII risk).
+`input_hash` (SHA256) always written.
 
 ---
 
 ## Cache (utils/cache.ts)
 
 ```typescript
-// Returns null if not cached or TTL expired (> 30 days)
-async function getCachedRestaurant(placeId: string): Promise<RestaurantCacheRow | null>
+// Returns null if not cached or TTL expired (> ttl_days days)
+export async function getCachedRestaurant(placeId: string): Promise<RestaurantCacheRow | null>
 
 // Upserts by place_id, resets last_analyzed to now()
-async function setCachedRestaurant(placeId: string, analysis: Partial<RestaurantCacheRow>): Promise<void>
+export async function setCachedRestaurant(placeId: string, analysis: Partial<RestaurantCacheRow>): Promise<void>
 ```
-
----
-
-## Feature Flag + Rollback
-
-In `apps/web/app/api/events/[id]/trigger/route.ts`:
-
-```typescript
-const USE_PIPELINE_V2 = process.env.PIPELINE_V2 === 'true';
-
-if (USE_PIPELINE_V2) {
-  result = await runPipeline(eventId);
-} else {
-  result = await legacyClaudeAdapter.synthesize(preferences, restaurants);
-}
-```
-
-`PIPELINE_V2=false` is the default. Changing to false + redeploying is the
-full rollback. New DB tables and columns are additive — legacy adapter ignores them.
 
 ---
 
 ## Code Conventions
 
 ### Comments
-- Write WHY, never WHAT
-- Bad: `// increment counter`
-- Good: `// wrap at 255 to match register limit`
-- Never: separator lines `//===`, section banners `// === Setup ===`
-- Never: restatements of function names above the function
-- When in doubt, omit the comment
+- Write WHY, never WHAT. When in doubt, omit.
 
 ### AI calls
 - Always use `tool_use` for structured output — never assistant prefill
-- Always log to `ai_logs` via `utils/logger.ts`
+- Always log to `ai_logs` via `utils/logger.ts`; use `safeLogStage` by default
 - Always use env vars for model names, never hardcode model strings
-- Always add retry logic on external API calls (2 retries, 1s backoff)
+- Always wrap external API calls with `withRetry` from `utils/retry.ts`
+- Budget values always in cents; guest IDs in prompts always `guest_0`/`guest_1`/etc.
 
-### General
-- Stage classes export a `run()` method
-- Synchronous stages (implicit-inference, deterministic-scorer,
-  fairness-checker) must not be async
-- All budget values in cents (not dollars)
-- Guest references in prompts use guest_0/guest_1/etc. — never real names
+### Stage exports
+- Stages that the orchestrator calls as `.run()` export `{ run }` objects:
+  `dealbreakerDetector`, `implicitInference`, `constraintExtractor`, `deterministicScorer = { score }`,
+  `vibeEmbedder`, `reranker`, `fairnessChecker`, `reasoningEngine`, `criticVerifier`, `narrativeGenerator`
+- `geminiMapsGrounding` is a bare function (also aliased as `geminiAdapter.run`)
+- `menuPhantom` is a bare function alias for `enrich`
+
+### Synchronous stages (must not be async)
+`implicit-inference`, `deterministic-scorer`, `fairness-checker`
+
+---
+
+## Production Readiness
+
+**Pipeline v2 is test-runnable (209/209 tests pass) but NOT production-ready.**
+
+Outstanding before production:
+- `database.types.ts` not regenerated — v2 proposal columns not typed (Session 7)
+- RLS policies missing on `ai_logs`, `structured_constraints`, `restaurant_cache` (Session 7)
+- Cohere reranker not yet integrated — deterministic reranker is the current implementation (Session 7)
+- Critic verifier swap-and-rerun not implemented (Session 7)
+- `fetchPlacesAISummaries` not implemented — Gemini only as candidate source (future)
+- `location_score` is 0.5 placeholder — real distance scoring needs coordinates (future)
+- Extended thinking beta string `'interleaved-thinking-2025-05-14'` needs verification (pre-production)
+- `totalCostMicros` always 0 in PipelineResult — cost aggregation deferred (Session 7)
 
 ---
 
 ## Session Tracking
 
-Update the line below at the end of each session.
-
 ```
-Current session: Session 3 — Track A stages (Gemini Maps grounding, Menu Phantom, cache)
+Current session: Session 7 — Production hardening
 ```
 
 ### Session log
 
-- [x] Session 1: Skeleton + DB migration (2026-05-20) — 33 new files, migration 009
-- [x] Session 2: Track B — dealbreaker-detector, implicit-inference, constraint-extractor (2026-05-20) — 30 new tests, 127/127 pass
-- [ ] Session 2: Track B — dealbreaker, implicit inference, constraint extractor
-- [ ] Session 3: Track A — Gemini Maps grounding, Menu Phantom, cache
-- [ ] Session 4: Scoring stack — deterministic scorer, vibe embedder, reranker, fairness checker
-- [ ] Session 5: Intelligence stack — reasoning engine, critic verifier, narrative generator
-- [ ] Session 6: Orchestrator wiring, API route update, feature flag
-- [ ] Session 7: UX — host confirmation card, proposal card updates
-- [ ] Session 8: Full test suite
+- [x] Session 1: Skeleton + DB migration 009 (2026-05-20) — 33 new files, ai_logs / structured_constraints / restaurant_cache tables, proposals columns
+- [x] Pre-S3 stabilization: migration 010 (guest_id + weight_multiplier + idempotent UNIQUE), @groupplan/ai added to type-check, shared withRetry utility, missing env vars in .env.example (2026-05-20)
+- [x] Session 2: Track B — dealbreaker-detector, implicit-inference, constraint-extractor (2026-05-20) — 127/127 tests
+- [x] Session 3: Track A — Gemini function-calling adapter, Menu Phantom Tier 1 (keyword inference), cache integration, DataSource/DietarySignal/DietaryAnalysis/EnrichedCandidate types (2026-05-20) — 148/148 tests
+- [x] Session 4: Scoring stack — deterministic-scorer, RestaurantScore extended with confidence/penalties/bonuses/constraintMatchSummary (2026-05-20) — 162/162 tests
+- [x] Session 5: Intelligence stack — vibe-embedder (Voyage AI REST), deterministic reranker, fairness-checker with envy model + priceLevel guard (2026-05-20) — 184/184 tests
+- [x] Session 6: Orchestrator wiring + reasoning engine + critic verifier + narrative generator + PIPELINE_V2 feature flag in trigger route (2026-05-20) — 209/209 tests
+- [ ] Session 7: Production hardening — database.types.ts regeneration, RLS policies, Cohere reranker, critic swap-and-rerun, cost tracking
+- [ ] Session 8: Full integration test suite, end-to-end smoke test
 
 ### Decisions log
 
-Record decisions made during sessions that aren't visible in code:
-
 **Session 1:**
-- `menu-phantom.ts` exports `menuPhantom` (not `enrich()`), `deterministic-scorer.ts` exports `deterministicScorer` (not `score()`) — orchestrator import names take precedence over spec aliases.
-- `logStage()` throws on DB failure. Use `safeLogStage()` (fire-and-forget) for all stage observability calls — only use `logStage()` when DB failure should propagate.
-- Migration number is `009_ai_pipeline.sql` (not `003` as written in spec — migrations 001–008 pre-existed)
+- Migration number is `009_ai_pipeline.sql` (not `003` — migrations 001–008 pre-existed)
+- `safeLogStage()` is fire-and-forget; use by default. `logStage()` throws on DB failure — only use when logging failure must propagate.
+- `menuPhantom` exports as bare function alias for `enrich`; `deterministicScorer` exports as `{ score }` object
+
+**Pre-Session-3 stabilization:**
+- `structured_constraints.guest_id` and `.weight_multiplier` were missing from migration 009. Added via migration 010 with `ADD COLUMN IF NOT EXISTS`.
+- `UNIQUE(invitation_id)` added idempotently via `DO $$ ... $$` block in migration 010.
+- `@groupplan/ai` added to turbo `type-check` pipeline so tsc runs on the AI package.
+- `withRetry` extracted to `packages/ai/src/utils/retry.ts` (was duplicated in two stage files).
 
 **Session 2:**
-- Added `ConstraintItem` (per-constraint atom), `ConstraintStrength`, `ImplicitInferenceResult` to `pipeline/types.ts`. `StructuredConstraint` is the DB-mapped per-guest aggregate; `ConstraintItem[]` is the Track B intermediate representation.
-- `implicit-inference` is synchronous — no API call. Returns `ImplicitInferenceResult` (context + inferred ConstraintItem[]).
-- `constraint-extractor` DB write is fatal (throws PipelineError on Supabase error) — constraints are required pipeline state.
-- `structured_constraints.invitation_id` has `UNIQUE` constraint added to migration 009 (required for `upsert onConflict`). If 009 is already applied to any environment, create a `010_unique_invitation_id.sql` instead..
+- `implicit-inference` returns `ImplicitInferenceResult { context, inferred }`, not just `ImplicitContext` — richer than spec.
+- `intensity_tier` on `StructuredConstraint` includes `'inferred'` as a 4th value (spec had 3).
+- `constraint-extractor` DB write is fatal — structured constraints are required pipeline state, not just logs.
+- `ConstraintItem` / `ConstraintStrength` / `ImplicitInferenceResult` added to `pipeline/types.ts`.
+
+**Session 3:**
+- Gemini REST API has no `google_maps` tool. Used function calling instead. All candidates are `source: 'inferred'`, not `'grounded'`.
+- **Gemini `place_id` values are model-generated slugs — not canonical Google Maps IDs.** Treat as session-local opaque identifiers. Do not assume stability or cross-run consistency.
+- `DietarySignal.source`: `'grounded'` (verified) / `'inferred'` (keyword-derived) / `'unknown'` (not mentioned). Tier 1 never sets `'grounded'`.
+- Menu Phantom Tier 2 / Tier 3 are stubs (`PipelineError('not implemented')`).
+- Cache writes in Menu Phantom are non-fatal.
+
+**Session 4:**
+- Disqualification is ONLY triggered by: (1) hard `cuisine_avoids` match on candidate `cuisine_types`, or (2) estimated price exceeds ALL hard-budget guests by >50%. Unknown dietary signals never disqualify.
+- `deterministicScorer` exported as `{ score }` to match `deterministicScorer.score(candidates, constraints)` in orchestrator.
+- `vibeMatchScore = 0.0` placeholder; `location_score = 0.5` placeholder — both deferred.
+- `RestaurantScore` extended with `confidence`, `penalties`, `bonuses`, `constraintMatchSummary`.
+- `review_score` clamped to [0, 1] via `clamp()` to guard against out-of-range Gemini ratings.
+
+**Session 5:**
+- Cohere reranker deferred. Reranker is deterministic: `composite * 0.50 + confidence * 0.25 + vibeMatchScore * 0.25`. Top 5 returned.
+- Vibe embedder uses Voyage AI REST API via `fetch` — no `voyageai` SDK added.
+- Candidates with empty `review_summary` → `vibeMatchScore: 0.3` (neutral-low, not 0.0).
+- Fairness checker: `priceLevel === 0` (unknown price) → skip budget envy. `budget_max === 999999` → treat as unconstrained, skip budget envy.
+- Fairness warnings are **uncertainty/context signals** for the reasoning engine — not disqualification signals. Warnings will be frequent with Tier 1 data (inferred dietary_score cap ~0.7, below the `< 1.0` threshold). This is intentional.
+- `envy_scores?` and `fairness_warnings?` added as optional fields on `RestaurantScore`.
+
+**Session 6:**
+- Orchestrator uses injectable `EventDataLoader` for testability. Default loader queries Supabase directly (event + invitations + guest_preferences).
+- `guest_id` in pipeline uses `invitation.id` (not `user_id`) — `user_id` is nullable for non-authenticated guests.
+- `fetchPlacesAISummaries` not yet implemented — orchestrator uses Gemini candidates only.
+- Critic verifier simplified: removes failing proposals, does not swap-and-rerun. Deferred to Session 7.
+- Extended thinking beta string: `'interleaved-thinking-2025-05-14'` — must verify against current Anthropic docs before production.
+- `PipelineResult.candidateDetails: Record<string, CandidateDetail>` carries restaurant info so the trigger route can map `place_id` → DB row fields.
+- V2 trigger route does NOT yet write `envy_scores`/`narrative_personal`/`confidence_score` to DB — `database.types.ts` must be regenerated first (Session 7).
+- `totalCostMicros` always 0 in `PipelineResult` — cost aggregation deferred to Session 7.
