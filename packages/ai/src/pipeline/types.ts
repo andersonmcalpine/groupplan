@@ -5,6 +5,7 @@ export interface PipelineResult {
   conflictsResolved: string[];
   totalLatencyMs: number;
   totalCostMicros: number;
+  candidateDetails: Record<string, CandidateDetail>;
 }
 
 export interface PipelineStage<TInput, TOutput> {
@@ -39,6 +40,7 @@ export interface StructuredConstraint {
 export interface RestaurantScore {
   place_id: string;
   name: string;
+  review_summary: string;
   dietary_score: number;
   budget_score: number;
   cuisine_score: number;
@@ -51,6 +53,12 @@ export interface RestaurantScore {
   enrichedDescription: string;
   dietaryAnalysis: Record<string, number>;
   priceLevel: number;
+  confidence: number;
+  penalties: string[];
+  bonuses: string[];
+  constraintMatchSummary: string;
+  envy_scores?: Record<string, number>;
+  fairness_warnings?: string[];
 }
 
 export interface EnvyScore {
@@ -107,4 +115,40 @@ export interface ConstraintItem {
 export interface ImplicitInferenceResult {
   context: ImplicitContext;
   inferred: ConstraintItem[];
+}
+
+export type DataSource = 'grounded' | 'inferred' | 'unknown';
+
+export interface DietarySignal {
+  source: DataSource;
+  confidence: number;
+  evidence?: string;
+}
+
+export type DietaryAnalysis = Record<string, DietarySignal>;
+
+export interface EnrichedCandidate {
+  place_id: string;
+  name: string;
+  address: string;
+  cuisine_types: string[];
+  price_range: string;
+  rating: number;
+  review_count: number;
+  review_summary: string;
+  dietary_analysis: DietaryAnalysis;
+  enrichment_tier: 1 | 2 | 3;
+  image_url?: string;
+  maps_url?: string;
+}
+
+export interface CandidateDetail {
+  name: string;
+  address: string;
+  cuisine_types: string[];
+  price_range: string;
+  rating: number;
+  review_summary: string;
+  image_url?: string;
+  maps_url?: string;
 }

@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { createClient } from '@supabase/supabase-js';
 import { PipelineError, StructuredConstraint, ConstraintItem, ImplicitInferenceResult } from '../pipeline/types';
 import { safeLogStage } from '../utils/logger';
+import { withRetry } from '../utils/retry';
 import type { DealbreakerOutput } from './dealbreaker-detector';
 
 export interface RawPreference {
@@ -10,19 +11,6 @@ export interface RawPreference {
   event_id: string;
   raw_text: string;
   weight_multiplier?: number;
-}
-
-async function withRetry<T>(fn: () => Promise<T>, retries = 2, delayMs = 1000): Promise<T> {
-  try {
-    return await fn();
-  } catch (err) {
-    const error = err as { status?: number };
-    if (retries > 0 && error.status === 429) {
-      await new Promise(resolve => setTimeout(resolve, delayMs));
-      return withRetry(fn, retries - 1, delayMs);
-    }
-    throw err;
-  }
 }
 
 function computeIntensityTier(items: ConstraintItem[]): 'hard' | 'strong' | 'soft' | 'inferred' {
